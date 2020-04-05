@@ -16,3 +16,9 @@ Then install the Python packages:
 ```
 $ pip install -r requirements.txt
 ```
+
+It's best to run the client with stderr redirected to a file:
+
+```
+$ python3 client.py 2> output.log
+```
