@@ -10,12 +10,21 @@ if __name__ == '__main__':
     cli = net.Client((host_ip, 5005))
     cli.rpc({'type': 'enter'})
     print("connected to host")
-    player = audio.Player()
-    player.start()
-    cli.raw_listeners.append(player.put_packet)
+    units = []
+    if 'play' in sys.argv or 'rec' not in sys.argv:
+        player = audio.Player()
+        player.start()
+        cli.raw_listeners.append(player.put_packet)
+        units.append(player)
+    if 'rec' in sys.argv:
+        recorder = audio.Recorder()
+        recorder.start()
+        recorder.listeners.append(cli.broadcast)
+        units.append(recorder)
     try:
         time.sleep(9999)
     except KeyboardInterrupt:
         print()
-        player.playing = False
-        cli.rpc({'type': 'leave'})
+    for unit in units:
+        unit.stop()
+    cli.rpc({'type': 'leave'})

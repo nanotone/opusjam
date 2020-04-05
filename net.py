@@ -95,6 +95,15 @@ class Client:
             self.seq += 1
             return self.seq
 
+    def broadcast(self, data):
+        for peer in self.known_peers:
+            name = peer['name']
+            if name == self.name:
+                continue
+            addr = self.peers.get_addr(name)
+            if addr:
+                self.sock.sendto(data, addr)
+
     def send(self, msg, addr):
         payload = json.dumps(msg).encode('ascii')
         self.sock.sendto(payload, addr)

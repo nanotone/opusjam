@@ -15,6 +15,35 @@ def get_audio():
     return _pa
 
 
+class Recorder:
+    def __init__(self):
+        self.enc = opuslib.Encoder(24000, 1, opuslib.APPLICATION_RESTRICTED_LOWDELAY)
+        self.listeners = []
+
+    def start(self):
+        self.recording = True
+        util.start_daemon(self.run)
+
+    def stop(self):
+        self.recording = False
+
+    def run(self):
+        stream = get_audio().open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=24000,
+            input=True,
+            frames_per_buffer=120,
+        )
+        while self.recording:
+            data = stream.read(120)
+            data = self.enc.encode(data, len(data) >> 1)
+            for listener in self.listeners:
+                listener(data)
+        stream.stop_stream()
+        stream.close()
+
+
 class Player:
     def __init__(self):
         self.dec = opuslib.Decoder(24000, 1)
@@ -23,6 +52,9 @@ class Player:
     def start(self):
         self.playing = True
         util.start_daemon(self.run)
+
+    def stop(self):
+        self.playing = False
 
     def run(self):
         stream = get_audio().open(
