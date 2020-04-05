@@ -1,4 +1,5 @@
 import json
+import logging
 import queue
 import random
 import socket
@@ -30,7 +31,7 @@ class PeerIndex:
         oldname = self.addrmap.get(addr)
         if oldname == name:
             return
-        print(name, "is", addr)
+        logging.info('{} is {}'.format(name, addr))
         self.addrmap[addr] = name
         if oldname:
             self.peers[oldname].remove(addr)
@@ -121,7 +122,7 @@ class Client:
         return payload
 
     def multisend(self, msg, peer, listener):
-        print("multisending <{}> to {}".format(msg['type'], peer))
+        logging.info("multisending <{}> to {}".format(msg['type'], peer))
         msg['from'] = self.name
         while listener.listening:
             msg['seq'] = listener.next_seq()
@@ -142,7 +143,7 @@ class Client:
                 addr = self.peers.get_addr(name)
                 if not addr:
                     addr = tuple(peer['addr'])
-                    print("trying to reach", name)
+                    logging.info("trying to reach " + name)
                 msg = {'type': 'ping', 'from': self.name, 'seq': self.next_seq(), 'time': time.time()}
                 self.send(msg, addr)
 
@@ -153,7 +154,7 @@ class Client:
         if peer == 'host':
             self.known_peers = payload['clients']
         else:
-            print("round-trip to {}: {:.1f} ms".format(
+            logging.info("round-trip to {}: {:.1f} ms".format(
                 peer, 1000*(time.time() - payload['time'])))
 
     def read_loop(self):
@@ -172,7 +173,6 @@ class Client:
             self.dispatch(payload, name)
 
     def dispatch(self, payload, peer):
-        #print("{}: {}".format(peer, payload))
         seq = payload.get('seq')
         if seq is None:
             return

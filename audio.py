@@ -22,10 +22,12 @@ class Recorder:
 
     def start(self):
         self.recording = True
-        util.start_daemon(self.run)
+        self.thread = util.start_daemon(self.run)
 
-    def stop(self):
+    def stop(self, block=False):
         self.recording = False
+        if block:
+            self.thread.join()
 
     def run(self):
         stream = get_audio().open(
@@ -51,10 +53,12 @@ class Player:
 
     def start(self):
         self.playing = True
-        util.start_daemon(self.run)
+        self.thread = util.start_daemon(self.run)
 
-    def stop(self):
+    def stop(self, block=False):
         self.playing = False
+        if block:
+            self.thread.join()
 
     def run(self):
         stream = get_audio().open(

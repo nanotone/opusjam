@@ -5,24 +5,47 @@ import net
 
 
 if __name__ == '__main__':
+    import logging
+    import readline
     import sys
-    host_ip = sys.argv[1]
+    logging.basicConfig(level=20)
+    print('enter relay server address: ', end='')
+    host_ip = input()
+    print('connecting to {}...'.format(host_ip))
     cli = net.Client((host_ip, 5005))
-    cli.rpc({'type': 'enter'})
-    print("connected to host")
-    units = []
-    if 'play' in sys.argv or 'rec' not in sys.argv:
-        player = audio.Player()
-        player.start()
-        cli.raw_listeners.append(player.put_packet)
-        units.append(player)
-    if 'rec' in sys.argv:
-        recorder = audio.Recorder()
-        recorder.start()
-        recorder.listeners.append(cli.broadcast)
-        units.append(recorder)
     try:
-        time.sleep(9999)
+        cli.rpc({'type': 'enter'})
+    except Exception as exc:
+        import traceback
+        traceback.print_exc(file=sys.stdout)
+        sys.exit(1)
+    print("connected to host at", host_ip)
+    player = audio.Player()
+    player.start()
+    cli.raw_listeners.append(player.put_packet)
+    recorder = None
+    units = [player]
+    try:
+        while True:
+            print('> ', end='')
+            cmd = input()
+            if cmd == 'record':
+                if recorder:
+                    print("already recording")
+                    continue
+                recorder = audio.Recorder()
+                recorder.start()
+                recorder.listeners.append(cli.broadcast)
+                units.append(recorder)
+            elif cmd == 'mute':
+                if not recorder:
+                    print("no recording to mute")
+                    continue
+                recorder.stop()
+                units.remove(recorder)
+                recorder = None
+            else:
+                print('eh wot?')
     except KeyboardInterrupt:
         print()
     for unit in units:
