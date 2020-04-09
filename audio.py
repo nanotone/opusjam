@@ -1,3 +1,4 @@
+import logging
 import queue
 import time
 
@@ -68,6 +69,7 @@ class Player:
             output=True,
             frames_per_buffer=120,
         )
+        last_log = 0
         while self.playing:
             try:
                 packet = self.queue.get_nowait()
@@ -76,6 +78,15 @@ class Player:
                 continue
             frame = self.dec.decode(packet, 120)
             stream.write(frame)
+            now = time.time()
+            if now - last_log > 1:
+                if last_log:
+                    logging.info("played {} frames in {:.3f} sec; queue size {}".format(
+                        frames, now - last_log, self.queue.qsize()
+                    ))
+                frames = 0
+                last_log = now
+            frames += 1
         stream.stop_stream()
         stream.close()
 
