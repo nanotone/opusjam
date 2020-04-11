@@ -25,10 +25,11 @@ class Recorder:
         self.recording = True
         self.thread = util.start_daemon(self.run)
 
-    def stop(self, block=False):
+    def stop(self, block=True):
         self.recording = False
         if block:
             self.thread.join()
+        logging.info("Recorder thread stopped and joined")
 
     def run(self):
         stream = get_audio().open(
@@ -39,7 +40,10 @@ class Recorder:
             frames_per_buffer=120,
         )
         while self.recording:
-            data = stream.read(120)
+            data = stream.read(120, exception_on_overflow=False)
+            if not data:
+                logging.warn("Overflow? " + repr(data))
+                continue
             data = self.enc.encode(data, len(data) >> 1)
             for listener in self.listeners:
                 listener(data)
@@ -56,10 +60,11 @@ class Player:
         self.playing = True
         self.thread = util.start_daemon(self.run)
 
-    def stop(self, block=False):
+    def stop(self, block=True):
         self.playing = False
         if block:
             self.thread.join()
+        logging.info("Player thread stopped and joined")
 
     def run(self):
         stream = get_audio().open(

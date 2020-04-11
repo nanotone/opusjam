@@ -44,9 +44,9 @@ if __name__ == '__main__':
                 recorder.stop()
                 units.remove(recorder)
                 recorder = None
-            else:
+            elif cmd:
                 print('eh wot?')
-    except KeyboardInterrupt:
+    except (EOFError, KeyboardInterrupt):
         print()
     for unit in units:
         unit.stop()
