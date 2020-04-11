@@ -5,7 +5,6 @@ import random
 import socket
 import threading
 import time
-import uuid
 
 import util
 
@@ -76,8 +75,8 @@ class TypeListener(Listener):
 
 
 class Client:
-    def __init__(self, host_addr):
-        self.name = str(uuid.uuid4())[:8]
+    def __init__(self, host_addr, name):
+        self.name = name
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.port = random.randint(49152, 65535)
         self.sock.bind(('', self.port))

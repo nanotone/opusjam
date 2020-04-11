@@ -9,10 +9,12 @@ if __name__ == '__main__':
     import readline
     import sys
     logging.basicConfig(level=20)
+    print('enter your name/alias: ', end='')
+    name = '{}-{}'.format(input(), str(time.time())[-3:])
     print('enter relay server address: ', end='')
     host_ip = input()
     print('connecting to {}...'.format(host_ip))
-    cli = net.Client((host_ip, 5005))
+    cli = net.Client((host_ip, 5005), name)
     try:
         cli.rpc({'type': 'enter'})
     except Exception as exc:
