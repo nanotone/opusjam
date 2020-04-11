@@ -22,33 +22,27 @@ class Recorder:
         self.listeners = []
 
     def start(self):
-        self.recording = True
-        self.thread = util.start_daemon(self.run)
-
-    def stop(self, block=True):
-        self.recording = False
-        if block:
-            self.thread.join()
-        logging.info("Recorder thread stopped and joined")
-
-    def run(self):
-        stream = get_audio().open(
+        self.stream = get_audio().open(
             format=pyaudio.paInt16,
             channels=1,
             rate=24000,
             input=True,
             frames_per_buffer=120,
+            stream_callback=self.callback,
         )
-        while self.recording:
-            data = stream.read(120, exception_on_overflow=False)
-            if not data:
-                logging.warn("Overflow? " + repr(data))
-                continue
-            data = self.enc.encode(data, len(data) >> 1)
+
+    def stop(self, block=True):
+        self.stream.stop_stream()
+        self.stream.close()
+
+    def callback(self, in_data, frame_count, time_info, status):
+        if frame_count == 120:
+            data = self.enc.encode(in_data, 120)
             for listener in self.listeners:
                 listener(data)
-        stream.stop_stream()
-        stream.close()
+        else:
+            logging.warn("Incorrect input frame count {}".format(frame_count))
+        return (None, pyaudio.paContinue)
 
 
 class Player:
