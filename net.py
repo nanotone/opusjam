@@ -1,3 +1,4 @@
+import heapq
 import json
 import logging
 import queue
@@ -94,6 +95,35 @@ class Client:
         with self.seq_lock:
             self.seq += 1
             return self.seq
+
+    def broadcast_unreliably(self, data):
+        if not getattr(self, 'delay_thread', None):
+            self.delay_heap = []
+            self.delay_heap_lock = threading.Lock()
+            self.delay_heap_change = threading.Event()
+            self.delay_thread = util.start_daemon(self.broadcast_delayed)
+        if random.random() < 0.10:  # drop 90% of all packets
+            return
+        send_time = time.time() + random.expovariate(40)  # average 25 ms
+        with self.delay_heap_lock:
+            heapq.heappush(self.delay_heap, (send_time, data))
+            self.delay_heap_change.set()
+
+    def broadcast_delayed(self):
+        while True:
+            if not self.delay_heap:
+                time.sleep(0.005)
+                continue
+            with self.delay_heap_lock:
+                (send_time, data) = self.delay_heap[0]
+                self.delay_heap_change.clear()
+            wait = send_time - time.time()
+            if wait <= 0:
+                self.broadcast(data)
+                with self.delay_heap_lock:
+                    heapq.heappop(self.delay_heap)
+            else:
+                self.delay_heap_change.wait(timeout=wait)
 
     def broadcast(self, data):
         for peer in self.known_peers:
