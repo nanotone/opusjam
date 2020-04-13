@@ -98,6 +98,10 @@ class Client:
             self.seq += 1
             return self.seq
 
+    def prepend_broadcast_seq(self, data):
+        self.broadcast_seq += 1
+        return struct.pack('!I', self.broadcast_seq) + data
+
     def broadcast_unreliably(self, data):
         if not getattr(self, 'delay_thread', None):
             self.delay_heap = []
@@ -107,8 +111,9 @@ class Client:
         if random.random() < 0.10:  # drop 90% of all packets
             return
         send_time = time.time() + random.expovariate(40)  # average 25 ms
+        item = (send_time, self.prepend_broadcast_seq(data))
         with self.delay_heap_lock:
-            heapq.heappush(self.delay_heap, (send_time, data))
+            heapq.heappush(self.delay_heap, item)
             self.delay_heap_change.set()
 
     def broadcast_delayed(self):
@@ -121,15 +126,15 @@ class Client:
                 self.delay_heap_change.clear()
             wait = send_time - time.time()
             if wait <= 0:
-                self.broadcast(data)
+                self.broadcast(data, include_seq=False)
                 with self.delay_heap_lock:
                     heapq.heappop(self.delay_heap)
             else:
                 self.delay_heap_change.wait(timeout=wait)
 
-    def broadcast(self, data):
-        data = struct.pack('!I', self.broadcast_seq) + data
-        self.broadcast_seq += 1
+    def broadcast(self, data, include_seq=True):
+        if include_seq:
+            data = self.prepend_broadcast_seq(data)
         for peer in self.known_peers:
             name = peer['name']
             if name == self.name:
