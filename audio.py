@@ -90,6 +90,7 @@ class Player:
         stream.close()
 
     def put_packet(self, data, addr):
+        data = data[4:]
         while True:
             try:
                 self.queue.put_nowait(data)

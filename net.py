@@ -4,6 +4,7 @@ import logging
 import queue
 import random
 import socket
+import struct
 import threading
 import time
 
@@ -88,6 +89,7 @@ class Client:
         self.known_peers = []
         self.peers = PeerIndex()
         self.peers.set_assoc('host', host_addr)
+        self.broadcast_seq = 0
         util.start_daemon(self.read_loop)
         util.start_daemon(self.ping_loop)
 
@@ -126,6 +128,8 @@ class Client:
                 self.delay_heap_change.wait(timeout=wait)
 
     def broadcast(self, data):
+        data = struct.pack('!I', self.broadcast_seq) + data
+        self.broadcast_seq += 1
         for peer in self.known_peers:
             name = peer['name']
             if name == self.name:
