@@ -4,6 +4,12 @@ Networked music performance is hard, because [30 ms of latency](https://dl.acm.o
 
 Does this already exist? Possibly, but let's give it another try, anyway.
 
+### How?
+
+- Peer-to-peer UDP. Use a public relay server only for matchmaking and hole-punching.
+- Opus, at 24 kHz ("super-wideband") mono. A 5 ms frame size forces CELT mode, and over the Internet, an extra 2.5 ms of latency should be worth the 50% reduction in packet frequency.
+- Optionally, a shared metronome halves the perceived delay by doing away with round trips, and eliminates tempo drift. Further work is needed to solve the problem of intentional tempo change (including rubato).
+
 ### Setup
 
 On OS X, use [Homebrew](https://brew.sh) to install Opus and PortAudio:
