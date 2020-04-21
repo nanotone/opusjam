@@ -8,6 +8,7 @@ import struct
 import threading
 import time
 
+import stats
 import util
 
 
@@ -26,7 +27,7 @@ class PeerIndex:
             return default
 
     def get_name(self, addr):
-        return self.addrmap[addr]
+        return self.addrmap.get(addr)
 
     def set_assoc(self, name, addr):
         oldname = self.addrmap.get(addr)
@@ -117,12 +118,14 @@ class Client:
         item = (send_time, self.prepend_broadcast_seq(data))
         with self.delay_heap_lock:
             heapq.heappush(self.delay_heap, item)
+            if random.random() < 0.01:  # dupe 1% of packets
+                heapq.heappush(self.delay_heap, (item[0] + random.expovariate(100), item[1]))
             self.delay_heap_change.set()
 
     def broadcast_delayed(self):
         while True:
             if not self.delay_heap:
-                time.sleep(0.005)
+                time.sleep(0.001)
                 continue
             with self.delay_heap_lock:
                 (send_time, data) = self.delay_heap[0]
@@ -195,15 +198,20 @@ class Client:
         if peer == 'host':
             self.known_peers = payload['clients']
         else:
-            logging.info("round-trip to {}: {:.1f} ms".format(
-                peer, 1000*(time.time() - payload['time'])))
+            stats.METER(
+                'rt {}'.format(peer),
+                1000 * (time.time() - payload['time']),
+            )
 
     def read_loop(self):
         while True:
             data, addr = self.sock.recvfrom(1024)
             if data[0] != 0x7b or data[-1] != 0x7d:
-                for listener in self.raw_listeners:
-                    listener(data, addr)
+                seq = struct.unpack('!I', data[:4])[0]
+                name = self.peers.get_name(addr)
+                if name is not None:
+                    for listener in self.raw_listeners:
+                        listener(seq, data[4:], name)
                 continue
             payload = json.loads(data.decode('ascii'))
             if 'from' in payload:
