@@ -26,6 +26,7 @@ if __name__ == '__main__':
     player = audio.Player()
     player.start()
     cli.raw_listeners.append(player.put_packet)
+    broadcast = getattr(cli, 'broadcast_unreliably' if '--unreliable' in sys.argv else 'broadcast')
     recorder = None
     units = [player]
     try:
@@ -38,7 +39,7 @@ if __name__ == '__main__':
                     continue
                 recorder = audio.Recorder()
                 recorder.start()
-                recorder.listeners.append(cli.broadcast)
+                recorder.listeners.append(broadcast)
                 units.append(recorder)
             elif cmd == 'mute':
                 if not recorder:
