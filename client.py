@@ -1,6 +1,7 @@
 import time
 
 import audio
+import logorrhea
 import net
 
 
@@ -46,6 +47,8 @@ if __name__ == '__main__':
                 recorder.stop()
                 units.remove(recorder)
                 recorder = None
+            elif cmd == 'log':
+                logorrhea.start_thread()
             elif cmd:
                 print('eh wot?')
     except (EOFError, KeyboardInterrupt):
