@@ -116,10 +116,6 @@ class Client:
             self.delay_heap_change = threading.Event()
             self.delay_thread = util.start_daemon(self.broadcast_delayed)
             self.dropped = False
-        if random.random() < 0.5:  # re-roll die only half the time
-            self.dropped = (random.random() < 0.10)  # drop 10% of all packets
-        if self.dropped:
-            return
         send_time = time.time() + random.expovariate(40)  # average 25 ms
         item = (send_time, self.prepare_broadcast(data))
         with self.delay_heap_lock:
@@ -138,9 +134,13 @@ class Client:
                 self.delay_heap_change.clear()
             wait = send_time - time.time()
             if wait <= 0:
-                self.broadcast(data, prepared=True)
-                with self.delay_heap_lock:
-                    heapq.heappop(self.delay_heap)
+                # drop 5% of all packets, but re-roll die only 50% of the time
+                if random.random() < 0.50:  # re-roll die 25% of the time
+                    self.dropped = (random.random() < 0.05)
+                if not self.dropped:
+                    self.broadcast(data, prepared=True)
+                    with self.delay_heap_lock:
+                        heapq.heappop(self.delay_heap)
             else:
                 self.delay_heap_change.wait(timeout=wait)
 
