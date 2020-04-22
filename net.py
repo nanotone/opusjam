@@ -1,3 +1,4 @@
+import collections
 import heapq
 import json
 import logging
@@ -91,6 +92,7 @@ class Client:
         self.peers = PeerIndex()
         self.peers.set_assoc('host', host_addr)
         self.broadcast_seq = 0
+        self.payloads = collections.deque()
         util.start_daemon(self.read_loop)
         util.start_daemon(self.ping_loop)
 
@@ -99,9 +101,13 @@ class Client:
             self.seq += 1
             return self.seq
 
-    def prepend_broadcast_seq(self, data):
+    def prepare_broadcast(self, data):
         self.broadcast_seq += 1
-        return struct.pack('!I', self.broadcast_seq) + data
+        payload = struct.pack('!II', self.broadcast_seq, len(data)) + data
+        self.payloads.appendleft(payload)
+        if len(self.payloads) > 3:
+            self.payloads.pop()
+        return b''.join(self.payloads)
 
     def broadcast_unreliably(self, data):
         if not getattr(self, 'delay_thread', None):
@@ -115,7 +121,7 @@ class Client:
         if self.dropped:
             return
         send_time = time.time() + random.expovariate(40)  # average 25 ms
-        item = (send_time, self.prepend_broadcast_seq(data))
+        item = (send_time, self.prepare_broadcast(data))
         with self.delay_heap_lock:
             heapq.heappush(self.delay_heap, item)
             if random.random() < 0.01:  # dupe 1% of packets
@@ -132,15 +138,15 @@ class Client:
                 self.delay_heap_change.clear()
             wait = send_time - time.time()
             if wait <= 0:
-                self.broadcast(data, include_seq=False)
+                self.broadcast(data, prepared=True)
                 with self.delay_heap_lock:
                     heapq.heappop(self.delay_heap)
             else:
                 self.delay_heap_change.wait(timeout=wait)
 
-    def broadcast(self, data, include_seq=True):
-        if include_seq:
-            data = self.prepend_broadcast_seq(data)
+    def broadcast(self, data, prepared=False):
+        if not prepared:
+            data = self.prepare_broadcast(data)
         for peer in self.known_peers:
             name = peer['name']
             if name == self.name:
@@ -207,11 +213,17 @@ class Client:
         while True:
             data, addr = self.sock.recvfrom(1024)
             if data[0] != 0x7b or data[-1] != 0x7d:
-                seq = struct.unpack('!I', data[:4])[0]
+                payloads = []
+                idx = 0
+                while idx < len(data):
+                    (seq, size) = struct.unpack('!II', data[idx : idx+8])
+                    idx += 8
+                    payloads.append((seq, data[idx : idx+size]))
+                    idx += size
                 name = self.peers.get_name(addr)
                 if name is not None:
                     for listener in self.raw_listeners:
-                        listener(seq, data[4:], name)
+                        listener(payloads, name)
                 continue
             payload = json.loads(data.decode('ascii'))
             if 'from' in payload:

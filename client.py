@@ -25,7 +25,7 @@ if __name__ == '__main__':
     print("connected to host at", host_ip)
     player = audio.Player()
     player.start()
-    cli.raw_listeners.append(player.put_packet)
+    cli.raw_listeners.append(player.put_payloads)
     broadcast = getattr(cli, 'broadcast_unreliably' if '--unreliable' in sys.argv else 'broadcast')
     recorder = None
     units = [player]

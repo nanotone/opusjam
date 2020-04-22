@@ -71,14 +71,15 @@ class Player:
         self.stream.stop_stream()
         self.stream.close()
 
-    def put_packet(self, seq, data, peer_name):
+    def put_payloads(self, payloads, peer_name):
         channel = self.channels.get(peer_name)
         if not channel:
             # in lieu of a lock, use attribute assignment to synchronize
             channels = dict(self.channels)
             channels[peer_name] = channel = Channel()
             self.channels = channels
-        channel.enqueue(seq, data)
+        for (seq, data) in payloads:
+            channel.enqueue(seq, data)
 
     def callback(self, in_data, frame_count, time_info, status):
         channels = self.channels
