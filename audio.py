@@ -82,10 +82,12 @@ class Player:
             channel.enqueue(seq, data)
 
     def callback(self, in_data, frame_count, time_info, status):
+        now = time.time()
         channels = self.channels
         for channel in channels.values():
-            data = channel.get_audio()
-            break
+            if channel.last_packet_time and now - channel.last_packet_time < 5:
+                data = channel.get_audio()
+                break
         else:
             data = Player.SILENCE
         assert len(data) == 240
@@ -102,6 +104,7 @@ class Channel:
         'decoder_thread',
         'dequeue_to',
         'dupe_check',
+        'last_packet_time',
         'latest_seq',
         'queue',
         'wake_event',
@@ -116,6 +119,7 @@ class Channel:
         self.dequeue_to = -1
         self.dupe_check = util.DupeCheck()
         self.decoded_seq = -1
+        self.last_packet_time = None
         self.latest_seq = -1
         self.queue = queue.PriorityQueue()
         self.wake_event = threading.Event()
@@ -124,6 +128,7 @@ class Channel:
 
     def enqueue(self, seq, data):
         """Enqueue a packet with its sequence number, and wake the decoder."""
+        self.last_packet_time = time.time()
         if not self.dupe_check.receive(seq):
             return
         #stats.METER('recv %', self.dupe_check.receive_rate * 100)
