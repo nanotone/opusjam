@@ -14,8 +14,6 @@ import util
 
 
 class Player:
-    SILENCE = b'\0' * 240
-
     def __init__(self):
         self.channels = {}
 
@@ -45,21 +43,15 @@ class Player:
 
     def callback(self, in_data, frame_count, time_info, status):
         now = time.time()
-        audios = [
+        frames = [
             channel.get_audio()
             for channel in self.channels.values()
             if channel.last_packet_time and now - channel.last_packet_time < 5
         ]
-        assert all(len(audio) == 240 for audio in audios)
-        if not audios:
-            audio = Player.SILENCE
-        elif len(audios) == 1:
-            audio = audios[0]
-        else:
-            audio = numpy.mean(
-                [numpy.frombuffer(a, dtype=numpy.int16) for a in audios],
-                axis=0, dtype=numpy.int16)
-        return (audio, pyaudio.paContinue)
+        frame = audio.mix(frames)
+        if isinstance(frame, numpy.ndarray) and frame.dtype != numpy.int16:
+            frame = frame.astype(numpy.int16)
+        return (frame, pyaudio.paContinue)
 
 
 Packet = collections.namedtuple('Packet', ['seq', 'data'])
@@ -74,6 +66,7 @@ class Channel:
         'dupe_check',
         'heap',
         'heap_lock',
+        'last_missing',
         'last_packet_time',
         'last_played',
         'ready_next_rate',
@@ -96,6 +89,7 @@ class Channel:
         self.wake_event = threading.Event()
         self.wake_lock = threading.Lock()
         self.decoder_thread = util.start_daemon(self.run_decoder)
+        self.last_missing = False
         self.last_played = None
 
     def enqueue(self, seq, data):
@@ -142,8 +136,21 @@ class Channel:
             packet = self.dequeue()
             if not packet:
                 continue  # out of luck! sleep until more data comes
+
             self.decoder_lock.acquire()
-            data = self.decoder.decode(packet.data, 120)
+            if self.last_played and packet.seq <= self.last_played:
+                # too late; missed the callback window
+                with self.wake_lock:
+                    self.decoder_lock.release()
+                    self.wake_event.clear()
+                continue
+            if self.last_missing:
+                one = self.decoder.decode(b'', 120)
+                two = self.decoder.decode(packet.data, 120)
+                data = audio.crossfade(one, two)
+                self.last_missing = False
+            else:
+                data = self.decoder.decode(packet.data, 120)
             self.wake_lock.acquire()
             self.decoded = Packet(packet.seq, data)
             self.decoder_lock.release()
@@ -180,13 +187,14 @@ class Channel:
             return packet.data
         if self.last_played:
             data = self.decoder.decode(b'', 120)
+            self.last_missing = True
             self.decoder_lock.release()
             stats.COUNT('missing')
             self.last_played += 1
             self.adjust_buffer()
             return data
         else:
-            return Player.SILENCE
+            return audio.SILENCE
 
     def should_play(self, packet):
         if not packet or (self.last_played and packet.seq != self.last_played + 1):
