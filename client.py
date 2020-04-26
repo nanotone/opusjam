@@ -3,6 +3,8 @@ import time
 import audio
 import logorrhea
 import net
+import player
+import recorder
 
 
 if __name__ == '__main__':
@@ -23,31 +25,33 @@ if __name__ == '__main__':
         traceback.print_exc(file=sys.stdout)
         sys.exit(1)
     print("connected to host at", host_ip)
-    player = audio.Player()
-    player.start()
-    cli.raw_listeners.append(player.put_payloads)
+    units = []
+    if '--silent' not in sys.argv:
+        play = player.Player()
+        play.start()
+        cli.raw_listeners.append(play.put_payloads)
+        units.append(play)
     broadcast = getattr(cli, 'broadcast_unreliably' if '--unreliable' in sys.argv else 'broadcast')
-    recorder = None
-    units = [player]
+    rec = None
     try:
         while True:
             print('> ', end='')
             cmd = input()
             if cmd == 'record':
-                if recorder:
+                if rec:
                     print("already recording")
                     continue
-                recorder = audio.Recorder()
-                recorder.start()
-                recorder.listeners.append(broadcast)
-                units.append(recorder)
+                rec = recorder.Recorder()
+                rec.start()
+                rec.listeners.append(broadcast)
+                units.append(rec)
             elif cmd == 'mute':
-                if not recorder:
+                if not rec:
                     print("no recording to mute")
                     continue
-                recorder.stop()
-                units.remove(recorder)
-                recorder = None
+                rec.stop()
+                units.remove(rec)
+                rec = None
             elif cmd == 'log':
                 logorrhea.start_thread()
             elif cmd:
