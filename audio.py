@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 
+import numpy
 import opuslib
 import pyaudio
 
@@ -84,15 +85,21 @@ class Player:
 
     def callback(self, in_data, frame_count, time_info, status):
         now = time.time()
-        channels = self.channels
-        for channel in channels.values():
-            if channel.last_packet_time and now - channel.last_packet_time < 5:
-                data = channel.get_audio()
-                break
+        audios = [
+            channel.get_audio()
+            for channel in self.channels.values()
+            if channel.last_packet_time and now - channel.last_packet_time < 5
+        ]
+        assert all(len(audio) == 240 for audio in audios)
+        if not audios:
+            audio = Player.SILENCE
+        elif len(audios) == 1:
+            audio = audios[0]
         else:
-            data = Player.SILENCE
-        assert len(data) == 240
-        return (data, pyaudio.paContinue)
+            audio = numpy.mean(
+                [numpy.frombuffer(a, dtype=numpy.int16) for a in audios],
+                axis=0, dtype=numpy.int16)
+        return (audio, pyaudio.paContinue)
 
 
 Packet = collections.namedtuple('Packet', ['seq', 'data'])
