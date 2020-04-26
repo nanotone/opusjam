@@ -134,8 +134,8 @@ class Client:
                 self.delay_heap_change.clear()
             wait = send_time - time.time()
             if wait <= 0:
-                # drop 5% of all packets, but re-roll die only 50% of the time
-                if random.random() < 0.50:  # re-roll die 25% of the time
+                # drop 5% of all packets, but re-roll die only 75% of the time
+                if random.random() < 0.75:
                     self.dropped = (random.random() < 0.05)
                 if not self.dropped:
                     self.broadcast(data, prepared=True)
