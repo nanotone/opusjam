@@ -47,7 +47,7 @@ if __name__ == '__main__':
                 continue
         except Exception:
             continue
-        reply['from'] = 'host'
+        reply['from'] = 'relay'
         if 'seq' in body:
             reply['seq'] = body['seq']
         sock.sendto(json.dumps(reply).encode('ascii'), addr)

@@ -15,16 +15,16 @@ if __name__ == '__main__':
     print('enter your name/alias: ', end='')
     name = '{}-{}'.format(input(), str(time.time())[-3:])
     print('enter relay server address: ', end='')
-    host_ip = input()
-    print('connecting to {}...'.format(host_ip))
-    cli = net.Client((host_ip, 5005), name)
+    relay_ip = input()
+    print('connecting to {}...'.format(relay_ip))
+    cli = net.Client((relay_ip, 5005), name)
     try:
         cli.rpc({'type': 'enter'})
     except Exception as exc:
         import traceback
         traceback.print_exc(file=sys.stdout)
         sys.exit(1)
-    print("connected to host at", host_ip)
+    print("connected to relay at", relay_ip)
     units = []
     if '--silent' not in sys.argv:
         play = player.Player()

@@ -13,17 +13,53 @@ import stats
 import util
 
 
+TIME_OFFSET = random.random()
+def offset_time():
+    return time.time() + TIME_OFFSET
+
+
+class Peer:
+    def __init__(self, name, addr):
+        self.name = name
+        self.addrs = [addr]
+        self.mindiff = -1e10
+        self.maxdiff = 1e10
+
+    @property
+    def addr(self):
+        return self.addrs[0]
+
+    def add(self, addr):
+        self.addrs.append(addr)
+
+    def remove(self, addr):
+        self.addrs.remove(addr)
+
+    def receive_pong(self, payload):
+        now = offset_time()
+        ping_time = payload.get('ping_time')
+        pong_time = payload.get('time')
+        if not (ping_time or pong_time):
+            return
+        stats.METER(
+            'RT {}'.format(self.name),
+            1000 * (now - ping_time),
+        )
+        self.mindiff = max(self.mindiff, pong_time - now)
+        self.maxdiff = min(self.mindiff, pong_time - ping_time)
+
+
 class PeerIndex:
     def __init__(self):
-        self.peers = {}  # name -> list(addr)
+        self.peers = {}  # name -> Peer
         self.addrmap = {}  # addr -> name
 
     def list_peers(self):
-        return [(peer, addrset[0]) for peer, addrset in self.peers.items()]
+        return [(name, peer.addr) for name, peer in self.peers.items()]
 
     def get_addr(self, name, default=None):
         try:
-            return self.peers[name][0]
+            return self.peers[name].addr
         except KeyError:
             return default
 
@@ -39,28 +75,23 @@ class PeerIndex:
         if oldname:
             self.peers[oldname].remove(addr)
         if name not in self.peers:
-            self.peers[name] = [addr]
+            self.peers[name] = Peer(name, addr)
         else:
-            self.peers[name].append(addr)
+            self.peers[name].add(addr)
 
 
 class Listener:
-    def __init__(self):
+    def __init__(self, client):
         self.queue = queue.Queue()
         self.listening = True
-
-    def receive(self, payload, peer):
-        self.queue.put_nowait((payload, peer))
-
-
-class SeqListener(Listener):
-    def __init__(self, client):
-        super().__init__()
         self.seqs = []
         self.client = client
 
     def matches(self, payload, seq=None):
         return seq in self.seqs
+
+    def receive(self, payload, peer):
+        self.queue.put_nowait((payload, peer))
 
     def next_seq(self):
         seq = self.client.next_seq()
@@ -68,18 +99,8 @@ class SeqListener(Listener):
         return seq
 
 
-class TypeListener(Listener):
-    def __init__(self, msgtype, receive_func):
-        super().__init__()
-        self.msgtype = msgtype
-        self.receive = receive_func
-
-    def matches(self, payload, seq=None):
-        return payload.get('type') == self.msgtype
-
-
 class Client:
-    def __init__(self, host_addr, name):
+    def __init__(self, relay_addr, name):
         self.name = name
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.port = random.randint(49152, 65535)
@@ -90,7 +111,7 @@ class Client:
         self.raw_listeners = []
         self.known_peers = []
         self.peers = PeerIndex()
-        self.peers.set_assoc('host', host_addr)
+        self.peers.set_assoc('relay', relay_addr)
         self.broadcast_seq = 0
         self.payloads = collections.deque()
         util.start_daemon(self.read_loop)
@@ -159,8 +180,8 @@ class Client:
         payload = json.dumps(msg).encode('ascii')
         self.sock.sendto(payload, addr)
 
-    def rpc(self, msg, dst='host'):
-        listener = SeqListener(self)
+    def rpc(self, msg, dst='relay'):
+        listener = Listener(self)
         self.listeners.append(listener)
         util.start_daemon(self.multisend, msg, dst, listener)
         try:
@@ -181,12 +202,10 @@ class Client:
             time.sleep(1)
 
     def ping_loop(self):
-        self.listeners.append(TypeListener('ping', self.receive_ping))
-        self.listeners.append(TypeListener('pong', self.receive_pong))
-        host_addr = self.peers.get_addr('host')
+        relay_addr = self.peers.get_addr('relay')
         while True:
             time.sleep(1)
-            for peer in [{'name': 'host'}] + self.known_peers:
+            for peer in [{'name': 'relay'}] + self.known_peers:
                 name = peer['name']
                 if name == self.name:
                     continue
@@ -194,20 +213,24 @@ class Client:
                 if not addr:
                     addr = tuple(peer['addr'])
                     logging.info("trying to reach " + name)
-                msg = {'type': 'ping', 'from': self.name, 'seq': self.next_seq(), 'time': time.time()}
+                msg = {'type': 'ping', 'from': self.name, 'seq': self.next_seq(), 'time': offset_time()}
                 self.send(msg, addr)
 
     def receive_ping(self, payload, peer):
-        self.send({'type': 'pong', 'from': self.name, 'seq': payload['seq'], 'time': payload['time']}, self.peers.get_addr(peer))
+        reply = {
+            'type': 'pong',
+            'from': self.name,
+            'seq': payload['seq'],
+            'ping_time': payload['time'],
+            'time': offset_time(),
+        }
+        self.send(reply, self.peers.get_addr(peer))
 
     def receive_pong(self, payload, peer):
-        if peer == 'host':
+        if peer == 'relay':
             self.known_peers = payload['clients']
         else:
-            stats.METER(
-                'rt {}'.format(peer),
-                1000 * (time.time() - payload['time']),
-            )
+            self.peers.peers[peer].receive_pong(payload)
 
     def read_loop(self):
         while True:
@@ -237,7 +260,13 @@ class Client:
         seq = payload.get('seq')
         if seq is None:
             return
-        for listener in self.listeners:
-            if listener.matches(payload, seq):
-                listener.receive(payload, peer)
-                break
+        payload_type = payload.get('type')
+        if payload_type == 'ping':
+            self.receive_ping(payload, peer)
+        elif payload_type == 'pong':
+            self.receive_pong(payload, peer)
+        else:
+            for listener in self.listeners:
+                if listener.matches(payload, seq):
+                    listener.receive(payload, peer)
+                    break
