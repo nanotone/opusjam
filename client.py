@@ -54,6 +54,9 @@ if __name__ == '__main__':
                 rec = None
             elif cmd == 'log':
                 logorrhea.start_thread()
+            elif cmd.startswith('tempo '):
+                bpm = int(cmd.split()[1])
+                cli.propose_tempo(bpm)
             elif cmd:
                 print('eh wot?')
     except (EOFError, KeyboardInterrupt):

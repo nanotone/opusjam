@@ -48,36 +48,8 @@ class Peer:
         self.mindiff = max(self.mindiff, pong_time - now)
         self.maxdiff = min(self.mindiff, pong_time - ping_time)
 
-
-class PeerIndex:
-    def __init__(self):
-        self.peers = {}  # name -> Peer
-        self.addrmap = {}  # addr -> name
-
-    def list_peers(self):
-        return [(name, peer.addr) for name, peer in self.peers.items()]
-
-    def get_addr(self, name, default=None):
-        try:
-            return self.peers[name].addr
-        except KeyError:
-            return default
-
-    def get_name(self, addr):
-        return self.addrmap.get(addr)
-
-    def set_assoc(self, name, addr):
-        oldname = self.addrmap.get(addr)
-        if oldname == name:
-            return
-        logging.info('{} is {}'.format(name, addr))
-        self.addrmap[addr] = name
-        if oldname:
-            self.peers[oldname].remove(addr)
-        if name not in self.peers:
-            self.peers[name] = Peer(name, addr)
-        else:
-            self.peers[name].add(addr)
+    def to_local_offset_time(self, peer_time):
+        return peer_time - (self.mindiff + self.maxdiff) * 0.5
 
 
 class Listener:
@@ -110,12 +82,39 @@ class Client:
         self.listeners = [] 
         self.raw_listeners = []
         self.known_peers = []
-        self.peers = PeerIndex()
-        self.peers.set_assoc('relay', relay_addr)
+
+        self.peers = {}  # name -> Peer
+        self.addrmap = {}  # addr -> name
+        self.set_assoc('relay', relay_addr)
+
         self.broadcast_seq = 0
         self.payloads = collections.deque()
+        self.tempo = None
         util.start_daemon(self.read_loop)
         util.start_daemon(self.ping_loop)
+        util.start_daemon(self.tempo_loop)
+
+    def get_addr(self, name):
+        try:
+            return self.peers[name].addr
+        except KeyError:
+            return None
+
+    def get_name(self, addr):
+        return self.addrmap.get(addr)
+
+    def set_assoc(self, name, addr):
+        oldname = self.addrmap.get(addr)
+        if oldname == name:
+            return
+        logging.info('{} is {}'.format(name, addr))
+        self.addrmap[addr] = name
+        if oldname:
+            self.peers[oldname].remove(addr)
+        if name not in self.peers:
+            self.peers[name] = Peer(name, addr)
+        else:
+            self.peers[name].add(addr)
 
     def next_seq(self):
         with self.seq_lock:
@@ -172,7 +171,7 @@ class Client:
             name = peer['name']
             if name == self.name:
                 continue
-            addr = self.peers.get_addr(name)
+            addr = self.get_addr(name)
             if addr:
                 self.sock.sendto(data, addr)
 
@@ -197,26 +196,84 @@ class Client:
         msg['from'] = self.name
         while listener.listening:
             msg['seq'] = listener.next_seq()
-            addr = self.peers.get_addr(peer)
+            addr = self.get_addr(peer)
             self.send(msg, addr)
             time.sleep(1)
 
+    def propose_tempo(self, bpm):
+        self.set_tempo({
+            'bpm': bpm,
+            'start': offset_time(),
+            'owner': self.name,
+            'seq': self.next_seq(),
+        })
+
+    def set_tempo(self, tempo):
+        self.tempo = tempo
+        if tempo['bpm']:
+            beat_dur = 60/tempo['bpm']
+            self.tempo_count = int((offset_time() - self.tempo_start(tempo))/beat_dur) + 1
+            stats.INSTANCE.printing = False
+        else:
+            stats.INSTANCE.printing = True
+
+    def tempo_start(self, tempo):
+        if not tempo:
+            return None
+        if tempo['owner'] == self.name:
+            return tempo['start']
+        return self.peers[tempo['owner']].to_local_offset_time(tempo['start'])
+
+    def tempo_loop(self):
+        while True:
+            if self.tempo is None or self.tempo['bpm'] == 0:
+                time.sleep(0.3)
+                continue
+            beat_time = self.tempo_start(self.tempo) + 60/self.tempo['bpm'] * self.tempo_count
+            now = offset_time()
+            sleep_time = beat_time - now
+            if sleep_time < 0.001:  # close enough!
+                print(self.tempo_count)
+                self.tempo_count += 1
+                continue
+            time.sleep(max(sleep_time - 0.001, 0.001))
+
     def ping_loop(self):
-        relay_addr = self.peers.get_addr('relay')
+        relay_addr = self.get_addr('relay')
         while True:
             time.sleep(1)
             for peer in [{'name': 'relay'}] + self.known_peers:
                 name = peer['name']
                 if name == self.name:
                     continue
-                addr = self.peers.get_addr(name)
+                addr = self.get_addr(name)
                 if not addr:
                     addr = tuple(peer['addr'])
                     logging.info("trying to reach " + name)
-                msg = {'type': 'ping', 'from': self.name, 'seq': self.next_seq(), 'time': offset_time()}
+                msg = {
+                    'type': 'ping',
+                    'from': self.name,
+                    'seq': self.next_seq(),
+                    'time': offset_time(),
+                }
+                if self.tempo:
+                    msg['tempo'] = self.tempo
                 self.send(msg, addr)
 
+    def should_change_tempo(self, tempo):
+        if self.tempo is None:
+            return True
+        peer = tempo['owner']
+        if (peer, tempo['seq']) == (self.tempo['owner'], self.tempo['seq']):
+            return False
+        new_start = self.tempo_start(tempo)
+        old_start = self.tempo_start(self.tempo)
+        return new_start > old_start
+
     def receive_ping(self, payload, peer):
+        tempo = payload.get('tempo')
+        if tempo and self.should_change_tempo(tempo):
+            self.set_tempo(tempo)
         reply = {
             'type': 'pong',
             'from': self.name,
@@ -224,37 +281,40 @@ class Client:
             'ping_time': payload['time'],
             'time': offset_time(),
         }
-        self.send(reply, self.peers.get_addr(peer))
+        self.send(reply, self.get_addr(peer))
 
     def receive_pong(self, payload, peer):
         if peer == 'relay':
             self.known_peers = payload['clients']
         else:
-            self.peers.peers[peer].receive_pong(payload)
+            self.peers[peer].receive_pong(payload)
 
     def read_loop(self):
         while True:
             data, addr = self.sock.recvfrom(1024)
             if data[0] != 0x7b or data[-1] != 0x7d:
-                payloads = []
-                idx = 0
-                while idx < len(data):
-                    (seq, size) = struct.unpack('!II', data[idx : idx+8])
-                    idx += 8
-                    payloads.append((seq, data[idx : idx+size]))
-                    idx += size
-                name = self.peers.get_name(addr)
-                if name is not None:
-                    for listener in self.raw_listeners:
-                        listener(payloads, name)
+                self.dispatch_binary(data, addr)
                 continue
             payload = json.loads(data.decode('ascii'))
             if 'from' in payload:
                 name = payload['from']
-                self.peers.set_assoc(name, addr)
+                self.set_assoc(name, addr)
             else:
-                name = self.peers.get_name(addr)
+                name = self.get_name(addr)
             self.dispatch(payload, name)
+
+    def dispatch_binary(self, data, addr):
+        payloads = []
+        idx = 0
+        while idx < len(data):
+            (seq, size) = struct.unpack('!II', data[idx : idx+8])
+            idx += 8
+            payloads.append((seq, data[idx : idx+size]))
+            idx += size
+        name = self.get_name(addr)
+        if name is not None:
+            for listener in self.raw_listeners:
+                listener(payloads, name)
 
     def dispatch(self, payload, peer):
         seq = payload.get('seq')

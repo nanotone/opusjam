@@ -7,6 +7,7 @@ import util
 
 class Stats:
     def __init__(self):
+        self.printing = True
         self.thread = util.start_daemon(self.run)
         self.trackers = self.create_trackers()
 
@@ -40,12 +41,13 @@ class Stats:
             if not record:
                 continue
             cols = sorted(record.keys())
-            if cols != prev_cols:
-                logging.info('{}'.format(' | '.join(cols)))
-            logging.info(' | '.join(
-                ' '*(len(col) - len(record[col])) + record[col]
-                for col in cols
-            ))
+            if self.printing:
+                if cols != prev_cols:
+                    logging.info('{}'.format(' | '.join(cols)))
+                logging.info(' | '.join(
+                    ' '*(len(col) - len(record[col])) + record[col]
+                    for col in cols
+                ))
             prev_cols = cols
 
 INSTANCE = Stats()
