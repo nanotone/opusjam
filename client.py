@@ -9,8 +9,11 @@ import recorder
 
 if __name__ == '__main__':
     import logging
-    import readline
     import sys
+    try:
+        import readline
+    except ModuleNotFoundError:
+        pass
     logging.basicConfig(level=20)
     print('enter your name/alias: ', end='')
     name = '{}-{}'.format(input(), str(time.time())[-3:])
